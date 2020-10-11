@@ -11,7 +11,6 @@ from itertools import count
 from threading import local
 from time import time
 
-from kombu.transport import redis
 from . import Exchange, Queue, Consumer, Producer
 from .clocks import LamportClock
 from .common import maybe_declare, oid_from
@@ -287,11 +286,21 @@ class Mailbox(object):
                 )
             except OperationalError as exc:
                 # Fixes https://github.com/celery/kombu/issues/1063
-                if exc.args and redis.NO_ROUTE_ERROR.format(exchange, routing_key) in exc.args[0]:
-                    error('NO_ROUTE_ERROR caught: %r', exc, exc_info=1)
-                    pass
-                else:
+                
+                if not exc.args:
                     raise
+
+                arg0 = exc.args[0]
+                noroute = "Cannot route message for exchange" in arg0 
+                table_empty =  "Table empty or key no longer exists." in arg0
+                target = "reply.celery.pidbox" in arg0
+
+                isinconsitency = noroute and table_empty and target
+                if not isinconsitency:
+                    raise
+
+                error('NO_ROUTE_ERROR caught: %r', exc, exc_info=1)
+
             except InconsistencyError:
                 # queue probably deleted and no one is expecting a reply.
                 pass
